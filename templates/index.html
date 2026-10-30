@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>NexusCRM — Customer Relationship Management</title>
+  <meta name="description" content="NexusCRM is a modern customer relationship management platform to manage companies, contacts, deals, and interactions in one place." />
+  <script src="/static/tailwind.js"></script>
+  <link rel="stylesheet" href="/static/fontawesome.min.css" />
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+  </style>
+  <style>
+    * { font-family: 'Inter', sans-serif; }
+    :root {
+      --sidebar-w: 260px;
+      --accent: #ff9933;
+      --accent-light: #ffd29a;
+      --accent-dark: #d97706;
+      --accent-green: #138808;
+      --accent-ink: #1f2937;
+    }
+    body { background: linear-gradient(180deg, #fffaf3 0%, #f8fafc 100%); }
+    #sidebar { width: var(--sidebar-w); min-height: 100vh; background: linear-gradient(180deg, #0b1d2b 0%, #0f3b2d 100%); box-shadow: inset -1px 0 0 rgba(255,255,255,0.06); }
+    .nav-item { transition: all 0.2s ease; }
+    .nav-item:hover, .nav-item.active { background: rgba(255,153,51,0.16); border-left: 3px solid var(--accent); }
+    .nav-item.active { background: rgba(255,153,51,0.2); }
+    .stat-card { background: linear-gradient(180deg, #ffffff 0%, #fffdf9 100%); border: 1px solid rgba(15,23,42,0.05); border-radius: 18px; transition: transform 0.2s, box-shadow 0.2s; }
+    .stat-card:hover { transform: translateY(-3px); box-shadow: 0 15px 30px rgba(15,23,42,0.09); }
+    .section { display: none; }
+    .section.active { display: block; }
+    /* Kanban */
+    .kanban-col { min-height: 400px; transition: background 0.2s; }
+    .kanban-col.drag-over { background: rgba(255,153,51,0.08) !important; border: 2px dashed var(--accent) !important; }
+    .deal-card { cursor: grab; transition: transform 0.15s, box-shadow 0.15s; }
+    .deal-card:hover { transform: translateY(-2px); box-shadow: 0 8px 22px rgba(15,23,42,0.1); }
+    .deal-card.dragging { opacity: 0.4; cursor: grabbing; }
+    /* Modal */
+    #modal-overlay { backdrop-filter: blur(4px); }
+    .modal-box { animation: slideUp 0.25s ease; }
+    @keyframes slideUp { from { opacity:0; transform:translateY(20px); } to { opacity:1; transform:translateY(0); } }
+    /* Table */
+    .data-table th { font-size: 0.7rem; letter-spacing: 0.08em; text-transform: uppercase; }
+    .data-table tbody tr { transition: background 0.15s; }
+    .data-table tbody tr:hover { background: #fffaf2; }
+    /* Scrollbar */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: #f8fafc; }
+    ::-webkit-scrollbar-thumb { background: #fbbf75; border-radius: 3px; }
+    /* Toast */
+    #toast { transition: all 0.3s ease; }
+    /* Input focus */
+    input:focus, select:focus, textarea:focus { outline: none; box-shadow: 0 0 0 3px rgba(255,153,51,0.15); }
+    /* Interaction timeline */
+    .timeline-item::before { content: ''; position: absolute; left: 19px; top: 48px; bottom: -12px; width: 2px; background: #f5d3a7; }
+    .timeline-item:last-child::before { display: none; }
+    /* Badge */
+    .stage-badge { font-size: 0.65rem; font-weight: 600; letter-spacing: 0.05em; padding: 2px 8px; border-radius: 999px; }
+  </style>
+</head>
+<body class="flex">
+
+<!-- ═══════════════════════════════════════════════════
+     SIDEBAR
+═══════════════════════════════════════════════════ -->
+<aside id="sidebar" class="fixed top-0 left-0 z-30 flex flex-col" style="width:var(--sidebar-w); height:100vh;">
+  <!-- Logo -->
+  <div class="px-6 py-6 border-b border-white/10">
+    <div class="flex items-center gap-3">
+      <div class="w-9 h-9 rounded-xl flex items-center justify-center" style="background:linear-gradient(135deg,#ff9933,#138808)">
+        <i class="fa-solid fa-bolt text-white text-sm"></i>
+      </div>
+      <div>
+        <h1 class="text-white font-bold text-lg leading-none">NexusCRM</h1>
+        <p class="text-indigo-300 text-xs mt-0.5">Business Intelligence</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Nav -->
+  <nav class="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
+    <p class="text-indigo-400 text-xs font-semibold px-3 pb-2 uppercase tracking-widest">Main Menu</p>
+    <a href="#" class="nav-item active flex items-center gap-3 px-3 py-2.5 rounded-xl text-white text-sm font-medium" data-section="dashboard" id="nav-dashboard">
+      <i class="fa-solid fa-chart-pie w-5 text-indigo-400"></i> Dashboard
+    </a>
+    <a href="#" class="nav-item flex items-center gap-3 px-3 py-2.5 rounded-xl text-slate-300 text-sm font-medium hover:text-white" data-section="companies" id="nav-companies">
+      <i class="fa-solid fa-building w-5 text-indigo-400"></i> Companies
+    </a>
+    <a href="#" class="nav-item flex items-center gap-3 px-3 py-2.5 rounded-xl text-slate-300 text-sm font-medium hover:text-white" data-section="contacts" id="nav-contacts">
+      <i class="fa-solid fa-address-book w-5 text-indigo-400"></i> Contacts
+    </a>
+    <a href="#" class="nav-item flex items-center gap-3 px-3 py-2.5 rounded-xl text-slate-300 text-sm font-medium hover:text-white" data-section="deals" id="nav-deals">
+      <i class="fa-solid fa-handshake w-5 text-indigo-400"></i> Deals
+    </a>
+    <a href="#" class="nav-item flex items-center gap-3 px-3 py-2.5 rounded-xl text-slate-300 text-sm font-medium hover:text-white" data-section="interactions" id="nav-interactions">
+      <i class="fa-solid fa-timeline w-5 text-indigo-400"></i> Activity Log
+    </a>
+  </nav>
+
+  <!-- Footer -->
+  <div class="px-4 py-4 border-t border-white/10">
+    <div class="flex items-center gap-3 px-2">
+      <div class="w-8 h-8 rounded-full bg-indigo-500 flex items-center justify-center text-white text-sm font-bold">A</div>
+      <div class="flex-1 min-w-0">
+        <p class="text-white text-sm font-medium truncate">Admin User</p>
+        <p class="text-indigo-400 text-xs truncate">admin@nexuscrm.io</p>
+      </div>
+    </div>
+  </div>
+</aside>
+
+<!-- ═══════════════════════════════════════════════════
+     MAIN CONTENT
+═══════════════════════════════════════════════════ -->
+<main class="flex-1 flex flex-col min-h-screen" style="margin-left:var(--sidebar-w);">
+  <!-- Top Bar -->
+  <header class="sticky top-0 z-20 bg-white border-b border-slate-200 px-8 py-4 flex items-center justify-between">
+    <div>
+      <h2 id="page-title" class="text-xl font-bold text-slate-800">Dashboard</h2>
+      <p id="page-subtitle" class="text-xs text-slate-500 mt-0.5">Overview of your CRM activity</p>
+    </div>
+    <div class="flex items-center gap-3">
+      <div class="relative">
+        <input id="global-search" type="text" placeholder="Search..." class="pl-9 pr-4 py-2 text-sm border border-slate-200 rounded-xl bg-slate-50 text-slate-700 w-52 focus:bg-white transition-all" />
+        <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs"></i>
+      </div>
+      <button id="btn-quick-add" class="flex items-center gap-2 px-4 py-2 text-sm font-semibold text-white rounded-xl transition-all hover:opacity-90 active:scale-95" style="background:linear-gradient(135deg,#ff9933,#138808)">
+        <i class="fa-solid fa-plus text-xs"></i> Add New
+      </button>
+    </div>
+  </header>
+
+  <div class="flex-1 p-8">
+
+    <!-- ─── DASHBOARD SECTION ─────────────────────────── -->
+    <section id="section-dashboard" class="section active">
+      <!-- Stat Cards -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-5 mb-8">
+        <div class="stat-card p-6 shadow-sm">
+          <div class="flex items-start justify-between">
+            <div>
+              <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider">Companies</p>
+              <p id="stat-companies" class="text-3xl font-bold text-slate-800 mt-1">—</p>
+              <p class="text-xs text-slate-400 mt-1">registered organizations</p>
+            </div>
+            <div class="w-12 h-12 rounded-2xl flex items-center justify-center" style="background:linear-gradient(135deg,#6366f1,#818cf8)">
+              <i class="fa-solid fa-building text-white"></i>
+            </div>
+          </div>
+        </div>
+        <div class="stat-card p-6 shadow-sm">
+          <div class="flex items-start justify-between">
+            <div>
+              <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider">Contacts</p>
+              <p id="stat-contacts" class="text-3xl font-bold text-slate-800 mt-1">—</p>
+              <p class="text-xs text-slate-400 mt-1">people in database</p>
+            </div>
+            <div class="w-12 h-12 rounded-2xl flex items-center justify-center" style="background:linear-gradient(135deg,#06b6d4,#38bdf8)">
+              <i class="fa-solid fa-users text-white"></i>
+            </div>
+          </div>
+        </div>
+        <div class="stat-card p-6 shadow-sm">
+          <div class="flex items-start justify-between">
+            <div>
+              <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider">Active Deals</p>
+              <p id="stat-deals" class="text-3xl font-bold text-slate-800 mt-1">—</p>
+              <p class="text-xs text-slate-400 mt-1">in pipeline</p>
+            </div>
+            <div class="w-12 h-12 rounded-2xl flex items-center justify-center" style="background:linear-gradient(135deg,#f59e0b,#fbbf24)">
+              <i class="fa-solid fa-handshake text-white"></i>
+            </div>
+          </div>
+        </div>
+        <div class="stat-card p-6 shadow-sm">
+          <div class="flex items-start justify-between">
+            <div>
+              <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider">Revenue</p>
+              <p id="stat-revenue" class="text-3xl font-bold text-slate-800 mt-1">—</p>
+              <p class="text-xs text-slate-400 mt-1">from closed-won deals</p>
+            </div>
+            <div class="w-12 h-12 rounded-2xl flex items-center justify-center" style="background:linear-gradient(135deg,#10b981,#34d399)">
+              <i class="fa-solid fa-dollar-sign text-white"></i>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Recent Activity -->
+      <div class="bg-white rounded-2xl shadow-sm overflow-hidden">
+        <div class="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+          <h3 class="font-semibold text-slate-800">Recent Activity</h3>
+          <a href="#" class="text-indigo-600 text-xs font-medium hover:underline" data-section="interactions" onclick="navigateTo('interactions');return false;">View All</a>
+        </div>
+        <div id="recent-interactions-list" class="divide-y divide-slate-50">
+          <div class="px-6 py-8 text-center text-slate-400 text-sm">Loading...</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ─── COMPANIES SECTION ──────────────────────────── -->
+    <section id="section-companies" class="section">
+      <div class="bg-white rounded-2xl shadow-sm overflow-hidden">
+        <div class="px-6 py-4 border-b border-slate-100 flex items-center justify-between flex-wrap gap-3">
+          <div class="flex items-center gap-3">
+            <input id="companies-search" type="text" placeholder="Search companies..." class="pl-4 pr-4 py-2 text-sm border border-slate-200 rounded-xl bg-slate-50 w-60" />
+          </div>
+          <button id="btn-add-company" class="flex items-center gap-2 px-4 py-2 text-sm font-semibold text-white rounded-xl hover:opacity-90" style="background:#6366f1">
+            <i class="fa-solid fa-plus text-xs"></i> Add Company
+          </button>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="data-table w-full text-sm text-left">
+            <thead class="bg-slate-50 text-slate-500">
+              <tr>
+                <th class="px-6 py-3 font-semibold">Company</th>
+                <th class="px-6 py-3 font-semibold">Industry</th>
+                <th class="px-6 py-3 font-semibold">Email</th>
+                <th class="px-6 py-3 font-semibold">Phone</th>
+                <th class="px-6 py-3 font-semibold">Website</th>
+                <th class="px-6 py-3 font-semibold">Added</th>
+                <th class="px-6 py-3 font-semibold text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="companies-tbody" class="text-slate-700"></tbody>
+          </table>
+        </div>
+        <div id="companies-empty" class="hidden px-6 py-12 text-center text-slate-400">
+          <i class="fa-solid fa-building text-4xl mb-3 text-slate-200"></i>
+          <p class="font-medium">No companies found</p>
+          <p class="text-xs mt-1">Click "Add Company" to get started</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ─── CONTACTS SECTION ───────────────────────────── -->
+    <section id="section-contacts" class="section">
+      <div class="bg-white rounded-2xl shadow-sm overflow-hidden">
+        <div class="px-6 py-4 border-b border-slate-100 flex items-center justify-between flex-wrap gap-3">
+          <input id="contacts-search" type="text" placeholder="Search contacts..." class="pl-4 pr-4 py-2 text-sm border border-slate-200 rounded-xl bg-slate-50 w-60" />
+          <button id="btn-add-contact" class="flex items-center gap-2 px-4 py-2 text-sm font-semibold text-white rounded-xl hover:opacity-90" style="background:#6366f1">
+            <i class="fa-solid fa-plus text-xs"></i> Add Contact
+          </button>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="data-table w-full text-sm text-left">
+            <thead class="bg-slate-50 text-slate-500">
+              <tr>
+                <th class="px-6 py-3 font-semibold">Name</th>
+                <th class="px-6 py-3 font-semibold">Company</th>
+                <th class="px-6 py-3 font-semibold">Position</th>
+                <th class="px-6 py-3 font-semibold">Email</th>
+                <th class="px-6 py-3 font-semibold">Phone</th>
+                <th class="px-6 py-3 font-semibold">Added</th>
+                <th class="px-6 py-3 font-semibold text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="contacts-tbody" class="text-slate-700"></tbody>
+          </table>
+        </div>
+        <div id="contacts-empty" class="hidden px-6 py-12 text-center text-slate-400">
+          <i class="fa-solid fa-address-book text-4xl mb-3 text-slate-200"></i>
+          <p class="font-medium">No contacts found</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ─── DEALS SECTION ──────────────────────────────── -->
+    <section id="section-deals" class="section">
+      <div class="flex items-center justify-between mb-5">
+        <div class="flex items-center gap-2 bg-white rounded-xl p-1 shadow-sm border border-slate-200">
+          <button id="btn-kanban-view" onclick="setDealsView('kanban')" class="px-4 py-1.5 text-sm rounded-lg font-medium transition-all bg-indigo-600 text-white">
+            <i class="fa-solid fa-table-columns mr-1.5"></i>Kanban
+          </button>
+          <button id="btn-table-view" onclick="setDealsView('table')" class="px-4 py-1.5 text-sm rounded-lg font-medium transition-all text-slate-500 hover:bg-slate-100">
+            <i class="fa-solid fa-table-list mr-1.5"></i>Table
+          </button>
+        </div>
+        <button id="btn-add-deal" class="flex items-center gap-2 px-4 py-2 text-sm font-semibold text-white rounded-xl hover:opacity-90" style="background:#6366f1">
+          <i class="fa-solid fa-plus text-xs"></i> Add Deal
+        </button>
+      </div>
+
+      <!-- Kanban Board -->
+      <div id="deals-kanban" class="grid grid-cols-5 gap-4 overflow-x-auto pb-4">
+        <!-- Populated by JS -->
+      </div>
+
+      <!-- Table View -->
+      <div id="deals-table-view" class="hidden bg-white rounded-2xl shadow-sm overflow-hidden">
+        <div class="overflow-x-auto">
+          <table class="data-table w-full text-sm text-left">
+            <thead class="bg-slate-50 text-slate-500">
+              <tr>
+                <th class="px-6 py-3 font-semibold">Deal Title</th>
+                <th class="px-6 py-3 font-semibold">Company</th>
+                <th class="px-6 py-3 font-semibold">Contact</th>
+                <th class="px-6 py-3 font-semibold">Value</th>
+                <th class="px-6 py-3 font-semibold">Stage</th>
+                <th class="px-6 py-3 font-semibold">Close Date</th>
+                <th class="px-6 py-3 font-semibold text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="deals-tbody" class="text-slate-700"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ─── INTERACTIONS SECTION ───────────────────────── -->
+    <section id="section-interactions" class="section">
+      <div class="flex items-center justify-between mb-5">
+        <div class="flex items-center gap-2 flex-wrap">
+          <span class="text-sm text-slate-500 font-medium">Filter:</span>
+          <button class="filter-btn px-3 py-1.5 text-xs font-semibold rounded-full bg-indigo-600 text-white" data-filter="all">All</button>
+          <button class="filter-btn px-3 py-1.5 text-xs font-semibold rounded-full bg-white text-slate-600 border border-slate-200 hover:bg-slate-50" data-filter="call"><i class="fa-solid fa-phone mr-1"></i>Call</button>
+          <button class="filter-btn px-3 py-1.5 text-xs font-semibold rounded-full bg-white text-slate-600 border border-slate-200 hover:bg-slate-50" data-filter="email"><i class="fa-solid fa-envelope mr-1"></i>Email</button>
+          <button class="filter-btn px-3 py-1.5 text-xs font-semibold rounded-full bg-white text-slate-600 border border-slate-200 hover:bg-slate-50" data-filter="meeting"><i class="fa-solid fa-video mr-1"></i>Meeting</button>
+          <button class="filter-btn px-3 py-1.5 text-xs font-semibold rounded-full bg-white text-slate-600 border border-slate-200 hover:bg-slate-50" data-filter="note"><i class="fa-solid fa-note-sticky mr-1"></i>Note</button>
+        </div>
+        <button id="btn-add-interaction" class="flex items-center gap-2 px-4 py-2 text-sm font-semibold text-white rounded-xl hover:opacity-90" style="background:#6366f1">
+          <i class="fa-solid fa-plus text-xs"></i> Log Activity
+        </button>
+      </div>
+      <div id="interactions-timeline" class="space-y-2 max-w-4xl"></div>
+      <div id="interactions-empty" class="hidden text-center py-16 text-slate-400">
+        <i class="fa-solid fa-timeline text-5xl mb-4 text-slate-200"></i>
+        <p class="font-medium text-slate-500">No activity logged yet</p>
+      </div>
+    </section>
+
+  </div><!-- /p-8 -->
+</main>
+
+<!-- ═══════════════════════════════════════════════════
+     MODAL OVERLAY
+═══════════════════════════════════════════════════ -->
+<div id="modal-overlay" class="fixed inset-0 z-50 hidden bg-black/40 flex items-center justify-center p-4">
+  <div id="modal-box" class="modal-box bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] flex flex-col">
+    <div class="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+      <h3 id="modal-title" class="text-lg font-bold text-slate-800">Modal Title</h3>
+      <button id="modal-close" class="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-500 transition-colors">
+        <i class="fa-solid fa-xmark"></i>
+      </button>
+    </div>
+    <div id="modal-body" class="px-6 py-5 overflow-y-auto flex-1 space-y-4">
+      <!-- Dynamic form content -->
+    </div>
+    <div class="px-6 py-4 border-t border-slate-100 flex gap-3 justify-end">
+      <button id="modal-cancel" class="px-5 py-2 text-sm font-medium text-slate-600 bg-slate-100 rounded-xl hover:bg-slate-200 transition-colors">Cancel</button>
+      <button id="modal-submit" class="px-5 py-2 text-sm font-semibold text-white rounded-xl hover:opacity-90 transition-all active:scale-95" style="background:linear-gradient(135deg,#6366f1,#a855f7)">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════
+     TOAST NOTIFICATION
+═══════════════════════════════════════════════════ -->
+<div id="toast" class="fixed bottom-6 right-6 z-[100] hidden">
+  <div id="toast-inner" class="flex items-center gap-3 px-5 py-3 rounded-2xl shadow-xl text-sm font-medium text-white min-w-[220px]">
+    <i id="toast-icon" class="fa-solid"></i>
+    <span id="toast-msg"></span>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════
+     CONFIRM DIALOG
+═══════════════════════════════════════════════════ -->
+<div id="confirm-overlay" class="fixed inset-0 z-[60] hidden bg-black/40 flex items-center justify-center p-4">
+  <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 text-center" style="animation:slideUp 0.2s ease">
+    <div class="w-14 h-14 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
+      <i class="fa-solid fa-triangle-exclamation text-red-500 text-xl"></i>
+    </div>
+    <h3 class="font-bold text-slate-800 text-lg mb-1">Confirm Delete</h3>
+    <p id="confirm-msg" class="text-slate-500 text-sm mb-6">Are you sure you want to delete this item?</p>
+    <div class="flex gap-3 justify-center">
+      <button id="confirm-cancel" class="px-5 py-2 rounded-xl text-sm font-medium bg-slate-100 text-slate-700 hover:bg-slate-200">Cancel</button>
+      <button id="confirm-ok" class="px-5 py-2 rounded-xl text-sm font-semibold text-white bg-red-500 hover:bg-red-600">Delete</button>
+    </div>
+  </div>
+</div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
