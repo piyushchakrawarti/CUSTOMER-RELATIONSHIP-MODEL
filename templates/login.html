@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#263f60" />
+  <title>Admin sign in — TechPhones CRM</title>
+  <link rel="stylesheet" href="/static/fontawesome.min.css" />
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&family=Manrope:wght@500;600;700;800&display=swap');
+    *{box-sizing:border-box}body{min-height:100vh;margin:0;display:grid;place-items:center;padding:24px;background:radial-gradient(ellipse at 12% 8%,#fce8ef 0,transparent 48%),radial-gradient(ellipse at 88% 92%,#e5f3ff 0,transparent 52%),#f7f5fb;color:#253348;font:14px 'DM Sans',sans-serif}
+    .login-card{width:min(420px,100%);padding:34px;border:1px solid #e4e9f2;border-radius:22px;background:#ffffffed;box-shadow:0 24px 70px #263f601c}
+    .brand{display:flex;align-items:center;gap:12px;margin-bottom:32px}.brand-icon{width:44px;height:44px;display:grid;place-items:center;border-radius:14px;background:linear-gradient(140deg,#82c4ef 0 48%,#e996a3 49%);color:white;font-size:19px}
+    .brand-name{font:800 20px 'Manrope',sans-serif;letter-spacing:-.7px}.brand-name span{color:#397fb8}.brand-sub{margin-top:3px;color:#758399;font-size:9px;letter-spacing:.13em;text-transform:uppercase}
+    h1{margin:0;font:800 23px 'Manrope',sans-serif;letter-spacing:-.6px}.intro{margin:7px 0 25px;color:#758399;font-size:12px;line-height:1.55}
+    form{display:grid;gap:15px}.auth-form[hidden]{display:none}.field{display:grid;gap:7px}.field label{font-size:11px;font-weight:700}.field input{width:100%;height:44px;padding:0 12px;border:1px solid #dfe6ef;border-radius:10px;background:white;color:#253348;font:13px 'DM Sans',sans-serif}.field input:focus{border-color:#6fa9d3;outline:3px solid #78b9e833}
+    .submit{height:44px;margin-top:3px;border:0;border-radius:10px;background:#397fb8;color:white;font:700 12px 'DM Sans',sans-serif;cursor:pointer}.submit:hover:not(:disabled){background:#2f6f9f}.submit:disabled{cursor:not-allowed;opacity:.6}
+    .message{padding:10px 12px;border-radius:9px;background:#fff0f2;color:#9e5261;font-size:11px;line-height:1.5}.message[hidden]{display:none}
+    .mode-switch{display:block;margin:18px auto 0;padding:4px;border:0;background:transparent;color:#2f6f9f;font:600 11px 'DM Sans',sans-serif;cursor:pointer}.mode-switch:hover{text-decoration:underline}.mode-switch[hidden]{display:none}
+    .secure-note{display:flex;justify-content:center;align-items:center;gap:7px;margin:20px 0 0;color:#8290a3;font-size:10px}.secure-note i{color:#4a98d2}
+    @media(max-width:480px){body{padding:16px}.login-card{padding:26px 22px}}
+  </style>
+</head>
+<body>
+  <main class="login-card">
+    <div class="brand">
+      <div class="brand-icon"><i class="fa-solid fa-mobile-screen-button"></i></div>
+      <div><div class="brand-name">Tech<span>Phones</span></div><div class="brand-sub">Retail CRM · India</div></div>
+    </div>
+    <h1 id="form-title">Admin sign in</h1>
+    <p class="intro" id="form-intro">Sign in to manage your customer relationships, inventory, sales, and follow-ups.</p>
+    <div class="message" id="auth-error" role="alert" hidden></div>
+    <form class="auth-form" id="login-form">
+      <div class="field"><label for="identifier">Gmail address</label><input id="identifier" name="identifier" type="email" placeholder="you@gmail.com" autocomplete="username" required maxlength="255" autofocus /></div>
+      <div class="field"><label for="login-password">Password</label><input id="login-password" name="password" type="password" autocomplete="current-password" required maxlength="1024" /></div>
+      <button class="submit" type="submit">Sign in</button>
+    </form>
+    <form class="auth-form" id="create-form" hidden>
+      <div class="field"><label for="new-username">Username</label><input id="new-username" name="username" autocomplete="username" required maxlength="64" /></div>
+      <div class="field"><label for="new-email">Email</label><input id="new-email" name="email" type="email" autocomplete="email" required maxlength="255" /></div>
+      <div class="field"><label for="new-password">Password</label><input id="new-password" name="password" type="password" autocomplete="new-password" required maxlength="1024" /></div>
+      <button class="submit" type="submit">Create account</button>
+    </form>
+    <button class="mode-switch" id="show-create" type="button" {% if account_exists %}hidden{% endif %}>Create account</button>
+    <button class="mode-switch" id="show-login" type="button" hidden>Back to sign in</button>
+    <p class="secure-note"><i class="fa-solid fa-shield-halved"></i> Secure administrator access</p>
+  </main>
+  <script>
+    const loginForm = document.getElementById('login-form');
+    const createForm = document.getElementById('create-form');
+    const errorBox = document.getElementById('auth-error');
+    const accountExists = {{ account_exists | tojson }};
+    const showLogin = () => {
+      loginForm.hidden = false;
+      createForm.hidden = true;
+      document.getElementById('show-create').hidden = accountExists;
+      document.getElementById('show-login').hidden = true;
+      document.getElementById('form-title').textContent = 'Admin sign in';
+      document.getElementById('form-intro').textContent = 'Sign in to manage your customer relationships, inventory, sales, and follow-ups.';
+      errorBox.hidden = true;
+    };
+    const showCreate = () => {
+      if (accountExists) return;
+      loginForm.hidden = true;
+      createForm.hidden = false;
+      document.getElementById('show-create').hidden = true;
+      document.getElementById('show-login').hidden = false;
+      document.getElementById('form-title').textContent = 'Create admin account';
+      document.getElementById('form-intro').textContent = 'Create the administrator account for this CRM.';
+      errorBox.hidden = true;
+    };
+    document.getElementById('show-create').addEventListener('click', showLogin);
+    document.getElementById('show-login').addEventListener('click', showCreate);
+
+    async function submitAuthForm(event, endpoint, payload) {
+      event.preventDefault();
+      const form = event.currentTarget;
+      const button = form.querySelector('button[type="submit"]');
+      button.disabled = true;
+      errorBox.hidden = true;
+      try {
+        const response = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload(form)),
+        });
+        if (!response.ok) {
+          const result = await response.json();
+          throw new Error(typeof result.detail === 'string' ? result.detail : 'Please check the information and try again.');
+        }
+        window.location.assign('/');
+      } catch (error) {
+        errorBox.textContent = error.message;
+        errorBox.hidden = false;
+        button.disabled = false;
+      }
+    }
+
+    loginForm.addEventListener('submit', (event) => submitAuthForm(
+      event,
+      '/api/auth/login',
+      (form) => ({
+        identifier: form.elements.identifier.value,
+        password: form.elements.password.value,
+      }),
+    ));
+    createForm.addEventListener('submit', (event) => submitAuthForm(
+      event,
+      '/api/auth/register',
+      (form) => ({
+        username: form.elements.username.value,
+        email: form.elements.email.value,
+        password: form.elements.password.value,
+      }),
+    ));
+  </script>
+</body>
+</html>

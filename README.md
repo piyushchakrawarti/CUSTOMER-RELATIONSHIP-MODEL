@@ -1,157 +1,88 @@
-# NexusCRM — Customer Relationship Management System
+# TechPhones CRM — Indian Mobile Retail
 
-A full-stack CRM built with **FastAPI** (Python), **MySQL**, and a modern **Tailwind CSS** frontend.
+TechPhones is a customer relationship manager for an Indian mobile-phone retailer. It helps shop staff keep customer details, phone inventory, completed sales, and customer follow-ups in one place. The stack is FastAPI, SQLAlchemy, MySQL, and a responsive HTML/CSS/JavaScript dashboard.
 
----
+## What works
 
-## Project Structure
+- Customer profiles with Indian mobile number validation, city, preferences, notes, sales count, and lifetime value
+- Phone inventory with model, variant, selling price, and stock level
+- Sales register linked to a customer and phone, with payment method, quantity, and stock deduction
+- Customer follow-ups for calls, WhatsApp, store visits, email, and notes
+- Dashboard metrics for monthly sales/revenue, customers, inventory, and follow-up reminders
+- Search across customers, phone models, sales, and reminders
+- Interactive API documentation at `/docs`
 
-```
-final crm/
-├── main.py              # FastAPI application entry point
-├── database.py          # SQLAlchemy async engine & session
-├── models.py            # ORM models (Company, Contact, Deal, Interaction)
-├── schemas.py           # Pydantic v2 schemas
-├── routers/
-│   ├── companies.py     # Company CRUD endpoints
-│   ├── contacts.py      # Contact CRUD endpoints
-│   ├── deals.py         # Deal CRUD endpoints
-│   └── interactions.py  # Interaction CRUD endpoints
-├── templates/
-│   └── index.html       # SPA frontend (Tailwind CSS + Font Awesome)
-├── static/
-│   └── app.js           # Frontend logic (fetch API, drag-and-drop)
-├── requirements.txt
-└── .env.example
-```
+The project seeds a few illustrative customers, products, sales, and reminders on first run to demonstrate the CRM. Replace these sample records with your shop's real data before using it as a business system. This is a local demo, not a hosted, multi-user production CRM.
 
----
-
-## Prerequisites
+## Requirements
 
 - Python 3.10+
 - MySQL 8.0+
 - pip
 
----
+## Run locally
 
-## Step 1 — Set Up MySQL Database
+1. Create a MySQL database:
 
-Connect to your MySQL server and run:
+   ```sql
+   CREATE DATABASE crm_db CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+   ```
 
-```sql
-CREATE DATABASE crm_db CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-```
+2. Copy `.env.example` to `.env`, then set the MySQL credentials:
 
-> The tables are created automatically when the app starts — no manual migrations needed.
+   ```env
+   DB_HOST=localhost
+   DB_PORT=3306
+   DB_USER=root
+   DB_PASSWORD=your_mysql_password
+   DB_NAME=crm_db
+   SESSION_SECRET=
+   ```
 
----
+   Generate a session secret with:
 
-## Step 2 — Configure Environment Variables
+   ```powershell
+   python -c "import secrets; print(secrets.token_urlsafe(48))"
+   ```
 
-Copy the example env file and fill in your MySQL credentials:
+   The app creates and stores a random local secret in the ignored `.session_secret` file if `SESSION_SECRET` is blank. For deployments, set a persistent `SESSION_SECRET` environment variable or in `.env` instead. Keep both `.env` and `.session_secret` private.
 
-```bash
-copy .env.example .env
-```
+3. Create a virtual environment and install dependencies:
 
-Edit `.env`:
+   ```powershell
+   python -m venv .venv
+   .\.venv\Scripts\Activate.ps1
+   pip install -r requirements.txt
+   ```
 
-```env
-DB_HOST=localhost
-DB_PORT=3306
-DB_USER=root
-DB_PASSWORD=your_mysql_password
-DB_NAME=crm_db
-```
+4. Start the server:
 
----
+   ```powershell
+   uvicorn main:app --reload --host 127.0.0.1 --port 8000
+   ```
 
-## Step 3 — Install Python Dependencies
+5. Visit <http://localhost:8000/login> and sign in with the admin's Gmail address and password. If this is the first run, select **Create account** to set up the first admin username, email, and password. Public account creation closes after that first account is created.
 
-Create and activate a virtual environment (recommended):
+On first startup, the CRM creates its tables and inserts sample phones and CRM records if the tables are empty. Existing tables are not dropped. The old CRM tables, if present, remain untouched.
 
-```bash
-# Windows
-python -m venv venv
-venv\Scripts\activate
+## CRM API
 
-# macOS/Linux
-python -m venv venv
-source venv/bin/activate
-```
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/api/dashboard` | Monthly shop metrics, recent sales, and pending reminders |
+| `POST` | `/api/auth/login` | Sign in as the configured administrator |
+| `POST` | `/api/auth/register` | Create the first admin account (one-time signup) |
+| `POST` | `/api/auth/logout` | Sign out and clear the admin session |
+| `GET`, `POST` | `/api/customers` | Search/list customers and add a customer |
+| `PUT`, `DELETE` | `/api/customers/{id}` | Update a customer; deletion is blocked if sales exist |
+| `GET`, `POST` | `/api/products` | List inventory or add a phone model |
+| `PUT` | `/api/products/{id}` | Update model price, stock, or specifications |
+| `GET`, `POST` | `/api/sales` | List sales or record a customer purchase and deduct stock |
+| `GET`, `POST` | `/api/follow-ups` | List reminders or schedule a customer interaction |
+| `PUT`, `DELETE` | `/api/follow-ups/{id}` | Update/complete or remove a reminder |
 
-Install packages:
+Recording a sale uses the server's price unless the manager provides an agreed selling price. The endpoint checks inventory in a database transaction and deducts the sold quantity.
 
-```bash
-pip install -r requirements.txt
-```
+## Configuration and production readiness
 
----
-
-## Step 4 — Run the Application
-
-```bash
-uvicorn main:app --reload --host 0.0.0.0 --port 8000
-```
-
-Open your browser at: **http://localhost:8000**
-
----
-
-## Step 5 — Explore the API (Optional)
-
-Interactive Swagger UI: **http://localhost:8000/docs**  
-ReDoc documentation: **http://localhost:8000/redoc**
-
----
-
-## API Endpoints Summary
-
-| Method | Endpoint                         | Description                  |
-|--------|----------------------------------|------------------------------|
-| GET    | `/api/dashboard/stats`           | Dashboard statistics         |
-| GET    | `/api/companies`                 | List all companies           |
-| POST   | `/api/companies`                 | Create a company             |
-| PUT    | `/api/companies/{id}`            | Update a company             |
-| DELETE | `/api/companies/{id}`            | Delete a company             |
-| GET    | `/api/contacts`                  | List all contacts            |
-| POST   | `/api/contacts`                  | Create a contact             |
-| PUT    | `/api/contacts/{id}`             | Update a contact             |
-| DELETE | `/api/contacts/{id}`             | Delete a contact             |
-| GET    | `/api/deals`                     | List all deals               |
-| POST   | `/api/deals`                     | Create a deal                |
-| PUT    | `/api/deals/{id}`                | Update deal (inc. stage)     |
-| DELETE | `/api/deals/{id}`                | Delete a deal                |
-| GET    | `/api/interactions`              | List all interactions        |
-| POST   | `/api/interactions`              | Log an interaction           |
-| PUT    | `/api/interactions/{id}`         | Update an interaction        |
-| DELETE | `/api/interactions/{id}`         | Delete an interaction        |
-
----
-
-## Features
-
-- **Dashboard**: Live stats (companies, contacts, active deals, revenue) and recent activity feed
-- **Companies**: Full CRUD with searchable table
-- **Contacts**: Linked to companies, full CRUD
-- **Deals Pipeline**: 
-  - Kanban board with 5 stages: Lead → Contacted → Proposal → Closed-Won → Closed-Lost
-  - **Drag-and-drop** cards between columns to update stage
-  - Toggle between Kanban and Table view
-- **Activity Log**: Timeline of calls, emails, meetings, and notes with type filtering
-- **Modals**: Smooth animated forms for all create/edit operations
-- **Toast Notifications**: Success and error feedback
-- **Confirm Dialogs**: Safe delete confirmations
-
----
-
-## Troubleshooting
-
-| Problem | Solution |
-|---------|----------|
-| `ModuleNotFoundError` | Run `pip install -r requirements.txt` in your virtual env |
-| `Connection refused` | Check MySQL is running and `.env` credentials are correct |
-| `Access denied` MySQL | Verify `DB_USER` and `DB_PASSWORD` in `.env` |
-| Tables not created | Check the startup logs — SQLAlchemy creates them automatically |
-| CORS issues | Already handled — CORS is configured for all origins |
+Keep `.env` and virtual environments out of version control. The included `.gitignore` already excludes them. Admin access uses a salted PBKDF2 password hash and a signed, HTTP-only session cookie; passwords must be non-empty but have no minimum length. Public account creation closes after the first admin account is created. The session signing secret must be at least 32 characters. Use HTTPS when exposing the app outside localhost; the session cookie is marked secure on HTTPS requests. Before using real customer data, add staff roles, backups, audit history, data-retention controls, and a migration tool. Customer phone numbers and purchase notes are personal data; avoid entering real customer information into a public demo deployment.

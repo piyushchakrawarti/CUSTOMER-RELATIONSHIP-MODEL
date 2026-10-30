@@ -1,739 +1,546 @@
-/*  NexusCRM — app.js
-    Full frontend logic: routing, API calls, rendering, modals, drag-and-drop
-    ======================================================================== */
-
-const API = '';   // Same origin — FastAPI serves both
-
-// ─── State ────────────────────────────────────────────────────────────────────
-let state = {
-  currentSection: 'dashboard',
-  companies: [],
-  contacts: [],
-  deals: [],
-  interactions: [],
-  currentFilter: 'all',
-  dealsView: 'kanban',
+const state = {
+  section: 'dashboard',
+  customers: [],
+  products: [],
+  sales: [],
+  followups: [],
+  dashboard: null,
+  search: '',
+  followupStatus: '',
+  modalType: null,
   editingId: null,
-  editingType: null,
-  draggedDealId: null,
+  presetCustomerId: null,
 };
 
-// ─── Utility Helpers ──────────────────────────────────────────────────────────
+const currency = new Intl.NumberFormat('en-IN', {
+  style: 'currency',
+  currency: 'INR',
+  maximumFractionDigits: 0,
+});
 
-function fmt(val) {
-  if (!val) return '<span class="text-slate-300">—</span>';
-  return val;
+const sectionInfo = {
+  dashboard: ['Dashboard', 'A clear view of your mobile shop'],
+  customers: ['Customers', 'Customer profiles and purchase history'],
+  inventory: ['Inventory', 'Phone models, pricing and stock'],
+  sales: ['Sales', 'Customer purchases and sales register'],
+  followups: ['Follow-ups', 'Calls, WhatsApp and post-purchase reminders'],
+};
+
+function money(value) {
+  return currency.format(Number(value) || 0);
 }
 
-function fmtMoney(val) {
-  if (val === null || val === undefined || val === '') return '—';
-  return '$' + parseFloat(val).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+function escapeHtml(value) {
+  return String(value ?? '').replace(/[&<>"']/g, (character) => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;',
+  })[character]);
 }
 
-function fmtDate(d) {
-  if (!d) return '—';
-  return new Date(d).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+function fmtDate(value, options = { day: 'numeric', month: 'short', year: 'numeric' }) {
+  return value ? new Date(value).toLocaleDateString('en-IN', options) : '—';
 }
 
-function fmtDatetime(d) {
-  if (!d) return '—';
-  return new Date(d).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+function fmtDateTime(value) {
+  return value
+    ? new Date(value).toLocaleString('en-IN', {
+      day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit',
+    })
+    : '—';
 }
 
-function avatar(name) {
-  const initials = name ? name.split(' ').map(w => w[0]).slice(0, 2).join('').toUpperCase() : '?';
-  const colors = ['#6366f1','#06b6d4','#f59e0b','#10b981','#ef4444','#8b5cf6','#ec4899'];
-  const color = colors[name ? name.charCodeAt(0) % colors.length : 0];
-  return `<div class="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold shrink-0" style="background:${color}">${initials}</div>`;
-}
-
-// ─── Toast ────────────────────────────────────────────────────────────────────
-
-let toastTimer;
-function showToast(msg, type = 'success') {
+function showToast(message, type = 'success') {
   const toast = document.getElementById('toast');
-  const inner = document.getElementById('toast-inner');
-  const icon = document.getElementById('toast-icon');
-  const msgEl = document.getElementById('toast-msg');
-  const colors = { success: '#10b981', error: '#ef4444', info: '#6366f1' };
-  const icons = { success: 'fa-circle-check', error: 'fa-circle-xmark', info: 'fa-circle-info' };
-  inner.style.background = colors[type] || colors.info;
-  icon.className = `fa-solid ${icons[type] || icons.info}`;
-  msgEl.textContent = msg;
-  toast.classList.remove('hidden');
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => toast.classList.add('hidden'), 3000);
+  toast.classList.toggle('error', type === 'error');
+  toast.querySelector('i').className = `fa-solid ${type === 'error' ? 'fa-circle-exclamation' : 'fa-circle-check'}`;
+  document.getElementById('toast-message').textContent = message;
+  toast.classList.add('show');
+  clearTimeout(showToast.timer);
+  showToast.timer = setTimeout(() => toast.classList.remove('show'), 3200);
 }
 
-// ─── Confirm Dialog ───────────────────────────────────────────────────────────
-
-function showConfirm(msg, onOk) {
-  document.getElementById('confirm-msg').textContent = msg;
-  document.getElementById('confirm-overlay').classList.remove('hidden');
-  const okBtn = document.getElementById('confirm-ok');
-  const cancelBtn = document.getElementById('confirm-cancel');
-  const cleanup = () => document.getElementById('confirm-overlay').classList.add('hidden');
-  okBtn.onclick = () => { cleanup(); onOk(); };
-  cancelBtn.onclick = cleanup;
-}
-
-// ─── API Calls ────────────────────────────────────────────────────────────────
-
-async function apiFetch(url, method = 'GET', body = null) {
-  const opts = {
-    method,
+async function apiFetch(url, options = {}) {
+  const response = await fetch(url, {
     headers: { 'Content-Type': 'application/json' },
-  };
-  if (body) opts.body = JSON.stringify(body);
-  const res = await fetch(API + url, opts);
-  if (res.status === 204) return null;
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: 'Unknown error' }));
-    throw new Error(err.detail || `HTTP ${res.status}`);
+    ...options,
+  });
+  if (!response.ok) {
+    if (response.status === 401) {
+      window.location.assign('/login');
+      throw new Error('Your session expired. Please sign in again.');
+    }
+    let message = `Request failed (${response.status})`;
+    try {
+      const body = await response.json();
+      message = typeof body.detail === 'string'
+        ? body.detail
+        : body.detail?.map((error) => error.msg).join(' ') || message;
+    } catch (error) {
+      if (!(error instanceof SyntaxError)) throw error;
+    }
+    throw new Error(message);
   }
-  return res.json();
+  return response.status === 204 ? null : response.json();
 }
 
-// ─── Navigation ───────────────────────────────────────────────────────────────
+async function loadData() {
+  try {
+    const search = state.search.trim();
+    const customerUrl = `/api/customers${search ? `?search=${encodeURIComponent(search)}` : ''}`;
+    const productUrl = `/api/products${search ? `?search=${encodeURIComponent(search)}` : ''}`;
+    const salesUrl = `/api/sales${search ? `?search=${encodeURIComponent(search)}` : ''}`;
+    const followupParams = new URLSearchParams();
+    if (search) followupParams.set('search', search);
+    if (state.followupStatus) followupParams.set('status', state.followupStatus);
+    const followupUrl = `/api/follow-ups${followupParams.size ? `?${followupParams}` : ''}`;
+    const [dashboard, customers, products, sales, followups] = await Promise.all([
+      apiFetch('/api/dashboard'),
+      apiFetch(customerUrl),
+      apiFetch(productUrl),
+      apiFetch(salesUrl),
+      apiFetch(followupUrl),
+    ]);
+    Object.assign(state, { dashboard, customers, products, sales, followups });
+    renderCurrentSection();
+    renderDashboard();
+  } catch (error) {
+    showToast(`Could not load CRM data: ${error.message}`, 'error');
+  }
+}
 
-const pageMeta = {
-  dashboard:    { title: 'Dashboard',       subtitle: 'Overview of your CRM activity' },
-  companies:    { title: 'Companies',        subtitle: 'Manage your organizations' },
-  contacts:     { title: 'Contacts',         subtitle: 'People in your network' },
-  deals:        { title: 'Deals Pipeline',   subtitle: 'Track and move deals through stages' },
-  interactions: { title: 'Activity Log',     subtitle: 'Calls, emails, meetings & notes' },
-};
+function renderCurrentSection() {
+  switch (state.section) {
+    case 'customers': renderCustomers(); break;
+    case 'inventory': renderInventory(); break;
+    case 'sales': renderSales(); break;
+    case 'followups': renderFollowups(); break;
+    default: break;
+  }
+}
 
 function navigateTo(section) {
-  document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
-  document.querySelectorAll('.nav-item').forEach(n => {
-    n.classList.remove('active','text-white');
-    n.classList.add('text-slate-300');
-  });
-  const activeSection = document.getElementById(`section-${section}`);
-  const activeNav = document.getElementById(`nav-${section}`);
-  if (activeSection) activeSection.classList.add('active');
-  if (activeNav) {
-    activeNav.classList.add('active','text-white');
-    activeNav.classList.remove('text-slate-300');
-  }
-  const meta = pageMeta[section] || {};
-  document.getElementById('page-title').textContent = meta.title || section;
-  document.getElementById('page-subtitle').textContent = meta.subtitle || '';
-  state.currentSection = section;
-  loadSection(section);
-}
-
-async function loadSection(section) {
-  try {
-    switch (section) {
-      case 'dashboard':    await loadDashboard(); break;
-      case 'companies':    await loadCompanies(); break;
-      case 'contacts':     await loadContacts(); break;
-      case 'deals':        await loadDeals(); break;
-      case 'interactions': await loadInteractions(); break;
-    }
-  } catch (e) {
-    showToast('Failed to load data: ' + e.message, 'error');
-  }
-}
-
-// Nav click handlers
-document.querySelectorAll('.nav-item[data-section]').forEach(el => {
-  el.addEventListener('click', e => {
-    e.preventDefault();
-    navigateTo(el.dataset.section);
-  });
-});
-
-// Quick add button
-document.getElementById('btn-quick-add').addEventListener('click', () => {
-  const qMap = {
-    dashboard: 'interaction', companies: 'company', contacts: 'contact',
-    deals: 'deal', interactions: 'interaction',
+  if (!sectionInfo[section]) return;
+  state.section = section;
+  document.querySelectorAll('.section').forEach((item) => item.classList.toggle('active', item.id === `section-${section}`));
+  document.querySelectorAll('.nav [data-section]').forEach((button) => button.classList.toggle('active', button.dataset.section === section));
+  document.getElementById('page-title').textContent = sectionInfo[section][0];
+  document.getElementById('page-subtitle').textContent = sectionInfo[section][1];
+  const addLabels = {
+    dashboard: 'Add customer',
+    customers: 'Add customer',
+    inventory: 'Add phone',
+    sales: 'Record sale',
+    followups: 'Add follow-up',
   };
-  openModal(qMap[state.currentSection] || 'company');
-});
-
-// ─── DASHBOARD ────────────────────────────────────────────────────────────────
-
-async function loadDashboard() {
-  const data = await apiFetch('/api/dashboard/stats');
-  document.getElementById('stat-companies').textContent = data.total_companies;
-  document.getElementById('stat-contacts').textContent = data.total_contacts;
-  document.getElementById('stat-deals').textContent = data.active_deals;
-  document.getElementById('stat-revenue').textContent = fmtMoney(data.total_revenue);
-  renderRecentInteractions(data.recent_interactions);
+  document.getElementById('add-button-label').textContent = addLabels[section];
+  state.search = '';
+  document.getElementById('global-search').value = '';
+  loadData();
 }
 
-function renderRecentInteractions(list) {
-  const container = document.getElementById('recent-interactions-list');
-  if (!list || list.length === 0) {
-    container.innerHTML = `<div class="px-6 py-12 text-center text-slate-400 text-sm">No recent activity</div>`;
-    return;
-  }
-  container.innerHTML = list.map(i => {
-    const typeConfig = interactionTypeConfig(i.type);
-    const who = i.contact_name || i.company_name || 'Unknown';
-    return `<div class="px-6 py-4 flex items-start gap-4">
-      <div class="w-9 h-9 rounded-full flex items-center justify-center shrink-0 ${typeConfig.bg}">
-        <i class="fa-solid ${typeConfig.icon} text-sm ${typeConfig.text}"></i>
-      </div>
-      <div class="flex-1 min-w-0">
-        <div class="flex items-center justify-between">
-          <p class="text-sm font-medium text-slate-800 truncate">${who}</p>
-          <span class="text-xs text-slate-400 shrink-0 ml-3">${fmtDatetime(i.interaction_date)}</span>
-        </div>
-        <p class="text-xs text-slate-500 truncate mt-0.5">${i.notes || 'No notes'}</p>
-      </div>
-    </div>`;
-  }).join('');
-}
+function renderDashboard() {
+  const data = state.dashboard;
+  if (!data) return;
+  document.getElementById('stat-customers').textContent = Number(data.total_customers).toLocaleString('en-IN');
+  document.getElementById('stat-sales').textContent = Number(data.sales_this_month).toLocaleString('en-IN');
+  document.getElementById('stat-revenue').textContent = money(data.revenue_this_month);
+  document.getElementById('stat-stock').textContent = Number(data.inventory_units).toLocaleString('en-IN');
+  document.getElementById('stat-stock-note').textContent = `${data.low_stock_items} model(s) need a stock check`;
+  document.getElementById('pending-count').textContent = `${data.pending_follow_ups} pending`;
 
-function interactionTypeConfig(type) {
-  const map = {
-    call:    { icon: 'fa-phone', bg: 'bg-blue-100',   text: 'text-blue-600',   label: 'Call',    color: '#3b82f6' },
-    email:   { icon: 'fa-envelope', bg: 'bg-purple-100', text: 'text-purple-600', label: 'Email',   color: '#8b5cf6' },
-    meeting: { icon: 'fa-video', bg: 'bg-green-100',  text: 'text-green-600',  label: 'Meeting', color: '#10b981' },
-    note:    { icon: 'fa-note-sticky', bg: 'bg-amber-100',  text: 'text-amber-600',  label: 'Note',    color: '#f59e0b' },
-  };
-  return map[type] || map.note;
-}
+  const sales = document.getElementById('recent-sales');
+  sales.innerHTML = data.recent_sales.length
+    ? data.recent_sales.map((sale) => `<div class="sale-row">
+        <div class="row-icon"><i class="fa-solid fa-mobile-screen-button"></i></div>
+        <div class="row-main"><strong>${escapeHtml(sale.customer_name)} · ${escapeHtml(sale.product_name)}</strong><span>${escapeHtml(sale.payment_method)} · ${fmtDateTime(sale.sold_at)}</span></div>
+        <div class="row-right"><strong>${money(sale.total)}</strong><span>${sale.quantity} unit(s)</span></div>
+      </div>`).join('')
+    : '<div class="empty"><i class="fa-solid fa-receipt"></i>No completed sales yet.</div>';
 
-// ─── COMPANIES ────────────────────────────────────────────────────────────────
-
-async function loadCompanies() {
-  state.companies = await apiFetch('/api/companies');
-  renderCompanies(state.companies);
-}
-
-function renderCompanies(list) {
-  const tbody = document.getElementById('companies-tbody');
-  const empty = document.getElementById('companies-empty');
-  if (!list || list.length === 0) {
-    tbody.innerHTML = '';
-    empty.classList.remove('hidden');
-    return;
-  }
-  empty.classList.add('hidden');
-  tbody.innerHTML = list.map(c => `
-    <tr data-id="${c.id}">
-      <td class="px-6 py-4">
-        <div class="flex items-center gap-3">
-          ${avatar(c.name)}
-          <div>
-            <p class="font-semibold text-slate-800">${escHtml(c.name)}</p>
-          </div>
-        </div>
-      </td>
-      <td class="px-6 py-4">${fmt(c.industry ? `<span class="px-2 py-0.5 bg-slate-100 rounded-md text-xs font-medium">${escHtml(c.industry)}</span>` : null)}</td>
-      <td class="px-6 py-4 text-slate-500">${fmt(c.email ? `<a href="mailto:${escHtml(c.email)}" class="hover:text-indigo-600">${escHtml(c.email)}</a>` : null)}</td>
-      <td class="px-6 py-4 text-slate-500">${fmt(c.phone)}</td>
-      <td class="px-6 py-4">${c.website ? `<a href="${escHtml(c.website)}" target="_blank" class="text-indigo-600 text-xs hover:underline">${escHtml(c.website)}</a>` : '—'}</td>
-      <td class="px-6 py-4 text-slate-400 text-xs">${fmtDate(c.created_at)}</td>
-      <td class="px-6 py-4 text-right">
-        <button onclick="openEditModal('company',${c.id})" class="p-1.5 rounded-lg text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 transition-colors mr-1"><i class="fa-solid fa-pen text-xs"></i></button>
-        <button onclick="deleteItem('company',${c.id},'${escHtml(c.name)}')" class="p-1.5 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50 transition-colors"><i class="fa-solid fa-trash text-xs"></i></button>
-      </td>
-    </tr>`).join('');
-}
-
-// Search
-document.getElementById('companies-search').addEventListener('input', e => {
-  const q = e.target.value.toLowerCase();
-  renderCompanies(state.companies.filter(c =>
-    c.name.toLowerCase().includes(q) ||
-    (c.industry || '').toLowerCase().includes(q) ||
-    (c.email || '').toLowerCase().includes(q)
-  ));
-});
-
-document.getElementById('btn-add-company').addEventListener('click', () => openModal('company'));
-
-// ─── CONTACTS ─────────────────────────────────────────────────────────────────
-
-async function loadContacts() {
-  state.contacts = await apiFetch('/api/contacts');
-  renderContacts(state.contacts);
-}
-
-function renderContacts(list) {
-  const tbody = document.getElementById('contacts-tbody');
-  const empty = document.getElementById('contacts-empty');
-  if (!list || list.length === 0) {
-    tbody.innerHTML = '';
-    empty.classList.remove('hidden');
-    return;
-  }
-  empty.classList.add('hidden');
-  tbody.innerHTML = list.map(c => `
-    <tr data-id="${c.id}">
-      <td class="px-6 py-4">
-        <div class="flex items-center gap-3">
-          ${avatar(c.name)}
-          <p class="font-semibold text-slate-800">${escHtml(c.name)}</p>
-        </div>
-      </td>
-      <td class="px-6 py-4">${c.company_name ? `<span class="px-2 py-0.5 bg-indigo-50 text-indigo-700 rounded-md text-xs font-medium">${escHtml(c.company_name)}</span>` : '—'}</td>
-      <td class="px-6 py-4 text-slate-500 text-sm">${fmt(c.position)}</td>
-      <td class="px-6 py-4 text-slate-500">${c.email ? `<a href="mailto:${escHtml(c.email)}" class="hover:text-indigo-600 text-sm">${escHtml(c.email)}</a>` : '—'}</td>
-      <td class="px-6 py-4 text-slate-500 text-sm">${fmt(c.phone)}</td>
-      <td class="px-6 py-4 text-slate-400 text-xs">${fmtDate(c.created_at)}</td>
-      <td class="px-6 py-4 text-right">
-        <button onclick="openEditModal('contact',${c.id})" class="p-1.5 rounded-lg text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 transition-colors mr-1"><i class="fa-solid fa-pen text-xs"></i></button>
-        <button onclick="deleteItem('contact',${c.id},'${escHtml(c.name)}')" class="p-1.5 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50 transition-colors"><i class="fa-solid fa-trash text-xs"></i></button>
-      </td>
-    </tr>`).join('');
-}
-
-document.getElementById('contacts-search').addEventListener('input', e => {
-  const q = e.target.value.toLowerCase();
-  renderContacts(state.contacts.filter(c =>
-    c.name.toLowerCase().includes(q) ||
-    (c.email || '').toLowerCase().includes(q) ||
-    (c.company_name || '').toLowerCase().includes(q)
-  ));
-});
-
-document.getElementById('btn-add-contact').addEventListener('click', () => openModal('contact'));
-
-// ─── DEALS ────────────────────────────────────────────────────────────────────
-
-const STAGES = ['Lead', 'Contacted', 'Proposal', 'Closed-Won', 'Closed-Lost'];
-const STAGE_COLORS = {
-  'Lead':        { bg: 'bg-slate-100', header: 'bg-slate-200', text: 'text-slate-700', badge: 'bg-slate-200 text-slate-700', dot: '#94a3b8' },
-  'Contacted':   { bg: 'bg-blue-50',   header: 'bg-blue-100',  text: 'text-blue-700',  badge: 'bg-blue-100 text-blue-700', dot: '#3b82f6' },
-  'Proposal':    { bg: 'bg-amber-50',  header: 'bg-amber-100', text: 'text-amber-700', badge: 'bg-amber-100 text-amber-700', dot: '#f59e0b' },
-  'Closed-Won':  { bg: 'bg-green-50',  header: 'bg-green-100', text: 'text-green-700', badge: 'bg-green-100 text-green-700', dot: '#10b981' },
-  'Closed-Lost': { bg: 'bg-red-50',    header: 'bg-red-100',   text: 'text-red-700',   badge: 'bg-red-100 text-red-700', dot: '#ef4444' },
-};
-
-async function loadDeals() {
-  state.deals = await apiFetch('/api/deals');
-  renderDeals();
-}
-
-function renderDeals() {
-  if (state.dealsView === 'kanban') renderKanban();
-  else renderDealsTable();
-}
-
-function setDealsView(view) {
-  state.dealsView = view;
-  document.getElementById('deals-kanban').classList.toggle('hidden', view !== 'kanban');
-  document.getElementById('deals-table-view').classList.toggle('hidden', view !== 'table');
-  document.getElementById('btn-kanban-view').className = view === 'kanban'
-    ? 'px-4 py-1.5 text-sm rounded-lg font-medium transition-all bg-indigo-600 text-white'
-    : 'px-4 py-1.5 text-sm rounded-lg font-medium transition-all text-slate-500 hover:bg-slate-100';
-  document.getElementById('btn-table-view').className = view === 'table'
-    ? 'px-4 py-1.5 text-sm rounded-lg font-medium transition-all bg-indigo-600 text-white'
-    : 'px-4 py-1.5 text-sm rounded-lg font-medium transition-all text-slate-500 hover:bg-slate-100';
-  renderDeals();
-}
-
-function renderKanban() {
-  const container = document.getElementById('deals-kanban');
-  container.innerHTML = STAGES.map(stage => {
-    const stageDeals = state.deals.filter(d => d.stage === stage);
-    const colors = STAGE_COLORS[stage];
-    const total = stageDeals.reduce((sum, d) => sum + (parseFloat(d.value) || 0), 0);
-    return `
-      <div class="flex flex-col" style="min-width:220px;">
-        <div class="rounded-t-2xl px-4 py-3 ${colors.header} flex items-center justify-between mb-0">
-          <div class="flex items-center gap-2">
-            <div class="w-2 h-2 rounded-full" style="background:${colors.dot}"></div>
-            <span class="text-xs font-bold ${colors.text} uppercase tracking-wide">${stage}</span>
-          </div>
-          <div class="flex items-center gap-2">
-            <span class="text-xs font-semibold ${colors.text} bg-white/60 px-2 py-0.5 rounded-full">${stageDeals.length}</span>
-          </div>
-        </div>
-        ${total > 0 ? `<div class="text-xs text-slate-500 font-medium px-4 py-1 ${colors.bg}">${fmtMoney(total)}</div>` : ''}
-        <div class="kanban-col flex-1 p-2 rounded-b-2xl space-y-2 ${colors.bg} min-h-[350px]"
-             data-stage="${stage}"
-             ondragover="onDragOver(event)"
-             ondragleave="onDragLeave(event)"
-             ondrop="onDrop(event,'${stage}')">
-          ${stageDeals.length === 0 ? `<div class="text-center py-8 text-xs text-slate-400"><i class="fa-regular fa-folder-open text-2xl mb-2 block"></i>No deals</div>` : ''}
-          ${stageDeals.map(d => dealCard(d)).join('')}
-        </div>
+  const reminders = document.getElementById('upcoming-followups');
+  reminders.innerHTML = data.upcoming_follow_ups.length
+    ? data.upcoming_follow_ups.map((item) => {
+      const overdue = new Date(item.due_at) < new Date();
+      return `<div class="follow-row">
+        <div class="row-icon" style="${overdue ? 'background:#fff0f2;color:#b85f70' : ''}"><i class="fa-solid ${item.activity_type === 'WhatsApp' ? 'fa-comment' : item.activity_type === 'Visit' ? 'fa-shop' : 'fa-phone'}"></i></div>
+        <div class="row-main"><strong>${escapeHtml(item.subject)}</strong><span>${escapeHtml(item.customer_name)} · ${escapeHtml(item.activity_type)}</span></div>
+        <div class="row-right"><span class="pill ${overdue ? 'warning' : ''}">${overdue ? 'Overdue' : fmtDate(item.due_at, { day: 'numeric', month: 'short' })}</span></div>
       </div>`;
-  }).join('');
+    }).join('')
+    : '<div class="empty"><i class="fa-solid fa-calendar-check"></i>No pending reminders.</div>';
+
+  const alert = document.getElementById('stock-alert');
+  alert.hidden = data.low_stock_items === 0;
+  document.getElementById('stock-alert-text').textContent = `${data.low_stock_items} phone model(s) are low on stock.`;
 }
 
-function dealCard(deal) {
-  const colors = STAGE_COLORS[deal.stage] || STAGE_COLORS['Lead'];
-  return `
-    <div class="deal-card bg-white rounded-xl p-3 shadow-sm border border-slate-100"
-         draggable="true"
-         data-id="${deal.id}"
-         ondragstart="onDragStart(event,${deal.id})"
-         ondragend="onDragEnd(event)">
-      <div class="flex items-start justify-between gap-2 mb-2">
-        <p class="text-sm font-semibold text-slate-800 leading-tight">${escHtml(deal.title)}</p>
-        <div class="flex gap-1 shrink-0">
-          <button onclick="openEditModal('deal',${deal.id})" class="p-1 rounded text-slate-300 hover:text-indigo-500 hover:bg-indigo-50"><i class="fa-solid fa-pen text-xs"></i></button>
-          <button onclick="deleteItem('deal',${deal.id},'${escHtml(deal.title)}')" class="p-1 rounded text-slate-300 hover:text-red-500 hover:bg-red-50"><i class="fa-solid fa-trash text-xs"></i></button>
-        </div>
-      </div>
-      ${deal.value ? `<p class="text-base font-bold text-indigo-600 mb-2">${fmtMoney(deal.value)}</p>` : ''}
-      ${deal.company_name ? `<div class="flex items-center gap-1.5 mb-1"><i class="fa-solid fa-building text-[10px] text-slate-400"></i><span class="text-xs text-slate-500 truncate">${escHtml(deal.company_name)}</span></div>` : ''}
-      ${deal.contact_name ? `<div class="flex items-center gap-1.5 mb-1"><i class="fa-solid fa-user text-[10px] text-slate-400"></i><span class="text-xs text-slate-500 truncate">${escHtml(deal.contact_name)}</span></div>` : ''}
-      ${deal.close_date ? `<div class="flex items-center gap-1.5 mt-2"><i class="fa-regular fa-calendar text-[10px] text-slate-400"></i><span class="text-xs text-slate-400">${fmtDate(deal.close_date)}</span></div>` : ''}
-    </div>`;
+function renderCustomers() {
+  const table = document.getElementById('customers-table');
+  document.getElementById('customers-empty').hidden = state.customers.length > 0;
+  table.innerHTML = state.customers.map((customer) => `<tr>
+    <td><div class="table-primary">${escapeHtml(customer.name)}</div><div class="table-secondary">Added ${fmtDate(customer.created_at)}</div></td>
+    <td><div>${escapeHtml(customer.phone)}</div><div class="table-secondary">${escapeHtml(customer.email || 'No email')}</div></td>
+    <td>${escapeHtml([customer.city, customer.state].filter(Boolean).join(', ') || '—')}</td>
+    <td>${customer.preferred_brand ? `<span class="pill">${escapeHtml(customer.preferred_brand)}</span>` : '—'}</td>
+    <td>${customer.sale_count}</td>
+    <td class="table-primary">${money(customer.lifetime_value)}</td>
+    <td><div class="table-actions"><button class="btn-small" data-edit-customer="${customer.id}">Edit</button><button class="btn-small" data-add-sale-customer="${customer.id}" title="Record a sale"><i class="fa-solid fa-receipt"></i></button><button class="btn-small" data-add-followup-customer="${customer.id}" title="Schedule follow-up"><i class="fa-solid fa-calendar-plus"></i></button></div></td>
+  </tr>`).join('');
 }
 
-function renderDealsTable() {
-  const tbody = document.getElementById('deals-tbody');
-  if (!state.deals.length) {
-    tbody.innerHTML = `<tr><td colspan="7" class="px-6 py-12 text-center text-slate-400">No deals yet</td></tr>`;
-    return;
-  }
-  tbody.innerHTML = state.deals.map(d => {
-    const colors = STAGE_COLORS[d.stage] || STAGE_COLORS['Lead'];
-    return `<tr data-id="${d.id}">
-      <td class="px-6 py-4 font-semibold text-slate-800">${escHtml(d.title)}</td>
-      <td class="px-6 py-4 text-slate-500">${fmt(d.company_name)}</td>
-      <td class="px-6 py-4 text-slate-500">${fmt(d.contact_name)}</td>
-      <td class="px-6 py-4 font-semibold text-indigo-600">${d.value ? fmtMoney(d.value) : '—'}</td>
-      <td class="px-6 py-4"><span class="stage-badge ${colors.badge}">${d.stage}</span></td>
-      <td class="px-6 py-4 text-slate-500">${fmtDate(d.close_date)}</td>
-      <td class="px-6 py-4 text-right">
-        <button onclick="openEditModal('deal',${d.id})" class="p-1.5 rounded-lg text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 mr-1"><i class="fa-solid fa-pen text-xs"></i></button>
-        <button onclick="deleteItem('deal',${d.id},'${escHtml(d.title)}')" class="p-1.5 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50"><i class="fa-solid fa-trash text-xs"></i></button>
-      </td>
+function renderInventory() {
+  const table = document.getElementById('inventory-table');
+  const rows = state.products.filter((product) => product.stock >= 0);
+  document.getElementById('inventory-empty').hidden = rows.length > 0;
+  table.innerHTML = rows.map((product) => `<tr>
+    <td><div class="table-primary">${escapeHtml(product.brand)} ${escapeHtml(product.name)}</div><div class="table-secondary">${escapeHtml(product.category)} · ${escapeHtml(product.colour)}</div></td>
+    <td>${escapeHtml(product.storage)}</td>
+    <td class="table-primary">${money(product.price)}</td>
+    <td><span class="${product.stock <= 5 ? 'low-stock' : ''}">${product.stock} unit(s)</span>${product.stock <= 5 ? '<div class="table-secondary">Restock soon</div>' : ''}</td>
+    <td><div>${escapeHtml(product.display)}</div><div class="table-secondary">${escapeHtml(product.camera)}</div></td>
+    <td><button class="btn-small" data-edit-product="${product.id}">Update stock / price</button></td>
+  </tr>`).join('');
+}
+
+function renderSales() {
+  const table = document.getElementById('sales-table');
+  document.getElementById('sales-empty').hidden = state.sales.length > 0;
+  table.innerHTML = state.sales.map((sale) => `<tr>
+    <td><div class="table-primary">#TP-${String(sale.id).padStart(4, '0')}</div><div class="table-secondary">${escapeHtml(sale.status)}</div></td>
+    <td><div class="table-primary">${escapeHtml(sale.customer_name)}</div><div class="table-secondary">${escapeHtml(sale.customer_phone)}</div></td>
+    <td>${escapeHtml(sale.product_name)}</td><td>${sale.quantity}</td>
+    <td class="table-primary">${money(sale.total)}</td><td><span class="pill">${escapeHtml(sale.payment_method)}</span></td>
+    <td>${fmtDate(sale.sold_at)}</td>
+  </tr>`).join('');
+}
+
+function renderFollowups() {
+  const table = document.getElementById('followups-table');
+  document.getElementById('followups-empty').hidden = state.followups.length > 0;
+  table.innerHTML = state.followups.map((item) => {
+    const overdue = item.status === 'Pending' && new Date(item.due_at) < new Date();
+    return `<tr>
+      <td><div class="${overdue ? 'low-stock' : ''}">${fmtDateTime(item.due_at)}</div>${overdue ? '<div class="table-secondary">Overdue</div>' : ''}</td>
+      <td><div class="table-primary">${escapeHtml(item.customer_name)}</div><div class="table-secondary">${escapeHtml(item.customer_phone)}</div></td>
+      <td><span class="pill">${escapeHtml(item.activity_type)}</span></td>
+      <td><div class="table-primary">${escapeHtml(item.subject)}</div><div class="table-secondary">${escapeHtml(item.notes || '')}</div></td>
+      <td><span class="pill ${item.status === 'Pending' && overdue ? 'warning' : item.status !== 'Pending' ? 'muted' : ''}">${escapeHtml(item.status)}</span></td>
+      <td><div class="table-actions">${item.status === 'Pending' ? `<button class="btn-small" data-complete-followup="${item.id}">Complete</button>` : ''}<button class="btn-small" data-edit-followup="${item.id}">Edit</button></div></td>
     </tr>`;
   }).join('');
 }
 
-document.getElementById('btn-add-deal').addEventListener('click', () => openModal('deal'));
-
-// Drag and Drop
-function onDragStart(e, id) {
-  state.draggedDealId = id;
-  e.currentTarget.classList.add('dragging');
-  e.dataTransfer.effectAllowed = 'move';
-}
-function onDragEnd(e) {
-  e.currentTarget.classList.remove('dragging');
-  document.querySelectorAll('.kanban-col').forEach(c => c.classList.remove('drag-over'));
-}
-function onDragOver(e) {
-  e.preventDefault();
-  e.dataTransfer.dropEffect = 'move';
-  const col = e.currentTarget.closest('.kanban-col') || e.currentTarget;
-  col.classList.add('drag-over');
-}
-function onDragLeave(e) {
-  const col = e.currentTarget.closest('.kanban-col') || e.currentTarget;
-  col.classList.remove('drag-over');
-}
-async function onDrop(e, stage) {
-  e.preventDefault();
-  const col = e.currentTarget;
-  col.classList.remove('drag-over');
-  if (!state.draggedDealId) return;
-  const deal = state.deals.find(d => d.id === state.draggedDealId);
-  if (!deal || deal.stage === stage) return;
-  try {
-    const updated = await apiFetch(`/api/deals/${state.draggedDealId}`, 'PUT', { stage });
-    const idx = state.deals.findIndex(d => d.id === state.draggedDealId);
-    if (idx > -1) state.deals[idx] = updated;
-    renderKanban();
-    showToast(`Deal moved to ${stage}`, 'success');
-  } catch (err) {
-    showToast('Failed to update deal: ' + err.message, 'error');
+function formField(label, name, options = {}) {
+  const { type = 'text', value = '', placeholder = '', required = false, min = '', max = '', step = '', full = false, choices = [], pattern = '', inputmode = '' } = options;
+  const attrs = [
+    `name="${name}"`,
+    `id="field-${name}"`,
+    `type="${type}"`,
+    required ? 'required' : '',
+    min !== '' ? `min="${min}"` : '',
+    max !== '' ? `max="${max}"` : '',
+    step ? `step="${step}"` : '',
+    pattern ? `pattern="${pattern}"` : '',
+    inputmode ? `inputmode="${inputmode}"` : '',
+    placeholder ? `placeholder="${escapeHtml(placeholder)}"` : '',
+  ].filter(Boolean).join(' ');
+  let input;
+  if (type === 'select') {
+    input = `<select ${attrs}>${choices.map(([choiceValue, choiceLabel]) => `<option value="${escapeHtml(choiceValue)}" ${String(value) === String(choiceValue) ? 'selected' : ''}>${escapeHtml(choiceLabel)}</option>`).join('')}</select>`;
+  } else if (type === 'textarea') {
+    input = `<textarea ${attrs}>${escapeHtml(value)}</textarea>`;
+  } else {
+    input = `<input ${attrs} value="${escapeHtml(value)}" />`;
   }
-  state.draggedDealId = null;
+  return `<div class="field ${full ? 'full' : ''}"><label for="field-${name}">${escapeHtml(label)}</label>${input}</div>`;
 }
 
-// ─── INTERACTIONS ─────────────────────────────────────────────────────────────
-
-async function loadInteractions() {
-  state.interactions = await apiFetch('/api/interactions');
-  renderInteractions();
+function customerChoices(selectedId) {
+  return state.customers.map((customer) => [
+    customer.id,
+    `${customer.name} · ${customer.phone}`,
+  ]).map(([id, label]) => [String(id), label, String(id) === String(selectedId)]);
 }
 
-function renderInteractions() {
-  const list = state.interactions.filter(i => state.currentFilter === 'all' || i.type === state.currentFilter);
-  const container = document.getElementById('interactions-timeline');
-  const empty = document.getElementById('interactions-empty');
-  if (!list.length) {
-    container.innerHTML = '';
-    empty.classList.remove('hidden');
+function openModal(type, record = null, presetCustomerId = null) {
+  if ((type === 'sale' || type === 'followup') && !state.customers.length) {
+    showToast('Add a customer before recording a sale or follow-up.', 'error');
+    navigateTo('customers');
     return;
   }
-  empty.classList.add('hidden');
-  container.innerHTML = list.map(i => {
-    const cfg = interactionTypeConfig(i.type);
-    const who = [i.contact_name, i.company_name].filter(Boolean).join(' · ');
-    return `
-      <div class="timeline-item relative flex gap-4 pb-3 pl-1">
-        <div class="w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${cfg.bg} z-10">
-          <i class="fa-solid ${cfg.icon} text-sm ${cfg.text}"></i>
-        </div>
-        <div class="flex-1 bg-white rounded-2xl shadow-sm p-4 border border-slate-100">
-          <div class="flex items-start justify-between gap-2">
-            <div class="flex items-center gap-2 flex-wrap">
-              <span class="text-xs font-bold uppercase tracking-wider ${cfg.text} ${cfg.bg} px-2 py-0.5 rounded-full">${cfg.label}</span>
-              ${who ? `<span class="text-sm font-medium text-slate-700">${escHtml(who)}</span>` : ''}
-              ${i.deal_title ? `<span class="text-xs bg-indigo-50 text-indigo-600 px-2 py-0.5 rounded-full">${escHtml(i.deal_title)}</span>` : ''}
-            </div>
-            <div class="flex items-center gap-1 shrink-0">
-              <span class="text-xs text-slate-400">${fmtDatetime(i.interaction_date)}</span>
-              <button onclick="openEditModal('interaction',${i.id})" class="p-1.5 rounded-lg text-slate-300 hover:text-indigo-600 hover:bg-indigo-50 ml-1"><i class="fa-solid fa-pen text-xs"></i></button>
-              <button onclick="deleteItem('interaction',${i.id},'this activity')" class="p-1.5 rounded-lg text-slate-300 hover:text-red-500 hover:bg-red-50"><i class="fa-solid fa-trash text-xs"></i></button>
-            </div>
-          </div>
-          ${i.notes ? `<p class="text-sm text-slate-600 mt-2 leading-relaxed">${escHtml(i.notes)}</p>` : ''}
-        </div>
-      </div>`;
-  }).join('');
+  if (type === 'sale' && !state.products.some((product) => product.stock > 0)) {
+    showToast('Add phone models with available stock before recording a sale.', 'error');
+    navigateTo('inventory');
+    return;
+  }
+  state.modalType = type;
+  state.editingId = record?.id || null;
+  state.presetCustomerId = presetCustomerId || record?.customer_id || null;
+  const titleMap = {
+    customer: record ? 'Update customer' : 'Add customer',
+    product: record ? 'Update phone inventory' : 'Add phone to inventory',
+    sale: 'Record a phone sale',
+    followup: 'Schedule a customer follow-up',
+  };
+  const subtitleMap = {
+    customer: 'Save the contact and preferences for your shop.',
+    product: 'Maintain the model, selling price and available stock.',
+    sale: 'Choose a customer and phone. Stock will update when saved.',
+    followup: 'Set a reminder for a customer conversation.',
+  };
+  document.getElementById('modal-title').textContent = titleMap[type];
+  document.getElementById('modal-subtitle').textContent = subtitleMap[type];
+  document.getElementById('modal-submit').textContent = record ? 'Save changes' : 'Save';
+  document.getElementById('modal-fields').innerHTML = buildForm(type, record);
+  const overlay = document.getElementById('modal-overlay');
+  overlay.classList.add('open');
+  overlay.setAttribute('aria-hidden', 'false');
+  document.body.style.overflow = 'hidden';
 }
 
-document.querySelectorAll('.filter-btn').forEach(btn => {
-  btn.addEventListener('click', () => {
-    document.querySelectorAll('.filter-btn').forEach(b => {
-      b.className = 'filter-btn px-3 py-1.5 text-xs font-semibold rounded-full bg-white text-slate-600 border border-slate-200 hover:bg-slate-50';
-    });
-    btn.className = 'filter-btn px-3 py-1.5 text-xs font-semibold rounded-full bg-indigo-600 text-white';
-    state.currentFilter = btn.dataset.filter;
-    renderInteractions();
-  });
-});
-
-document.getElementById('btn-add-interaction').addEventListener('click', () => openModal('interaction'));
-
-// ─── MODAL ────────────────────────────────────────────────────────────────────
-
-const modalOverlay = document.getElementById('modal-overlay');
-document.getElementById('modal-close').addEventListener('click', closeModal);
-document.getElementById('modal-cancel').addEventListener('click', closeModal);
-modalOverlay.addEventListener('click', e => { if (e.target === modalOverlay) closeModal(); });
+function buildForm(type, record) {
+  const data = record || {};
+  if (type === 'customer') {
+    return [
+      formField('Customer name', 'name', { value: data.name || '', required: true, placeholder: 'Full name' }),
+      formField('Mobile number', 'phone', { value: data.phone || '', required: true, placeholder: '10-digit Indian number', pattern: '(?:\\+91[\\s\\-]?)?[6-9][0-9\\s\\-]{9,13}', inputmode: 'tel' }),
+      formField('Email', 'email', { type: 'email', value: data.email || '', placeholder: 'Optional' }),
+      formField('Preferred brand', 'preferred_brand', { type: 'select', value: data.preferred_brand || '', choices: [['', 'Not specified'], ...[...new Set(state.products.map((product) => product.brand))].map((brand) => [brand, brand])] }),
+      formField('City', 'city', { value: data.city || '', placeholder: 'e.g. Pune' }),
+      formField('State', 'state', { value: data.state || '', placeholder: 'e.g. Maharashtra' }),
+      formField('PIN code', 'pincode', { value: data.pincode || '', pattern: '[0-9]{6}', inputmode: 'numeric', placeholder: '6 digits' }),
+      formField('Address', 'address', { type: 'textarea', value: data.address || '', full: true, placeholder: 'Optional delivery or visit address' }),
+      formField('Customer notes', 'notes', { type: 'textarea', value: data.notes || '', full: true, placeholder: 'Preferences, exchange interest, service notes...' }),
+    ].join('');
+  }
+  if (type === 'product') {
+    return [
+      formField('Brand', 'brand', { value: data.brand || '', required: true, placeholder: 'e.g. Samsung' }),
+      formField('Model', 'name', { value: data.name || '', required: true, placeholder: 'e.g. Galaxy A56 5G' }),
+      formField('Category', 'category', { type: 'select', value: data.category || 'Android', choices: [['Android', 'Android'], ['iPhone', 'iPhone'], ['Feature phone', 'Feature phone'], ['Accessory', 'Accessory']] }),
+      formField('Selling price (₹)', 'price', { type: 'number', value: data.price ?? '', required: true, min: '1', step: '0.01', placeholder: '29999' }),
+      formField('Stock quantity', 'stock', { type: 'number', value: data.stock ?? 0, required: true, min: '0', step: '1' }),
+      formField('Storage / RAM', 'storage', { value: data.storage || '8 GB / 128 GB' }),
+      formField('Colour', 'colour', { value: data.colour || 'Black' }),
+      formField('Display', 'display', { value: data.display || '—' }),
+      formField('Camera', 'camera', { value: data.camera || '—' }),
+      formField('Battery', 'battery', { value: data.battery || '—' }),
+    ].join('');
+  }
+  if (type === 'sale') {
+    const customers = customerChoices(state.presetCustomerId);
+    return [
+      formField('Customer', 'customer_id', { type: 'select', value: state.presetCustomerId || customers[0]?.[0] || '', required: true, choices: customers.map(([id, label]) => [id, label]) }),
+      formField('Phone model', 'product_id', { type: 'select', value: data.product_id || state.products.find((product) => product.stock > 0)?.id || '', required: true, choices: state.products.filter((product) => product.stock > 0).map((product) => [String(product.id), `${product.brand} ${product.name} · ${product.stock} in stock`]) }),
+      formField('Quantity', 'quantity', { type: 'number', value: 1, required: true, min: '1', max: '100', step: '1' }),
+      formField('Selling price per unit (₹)', 'unit_price', { type: 'number', value: '', min: '1', step: '0.01', placeholder: 'Leave blank to use list price' }),
+      formField('Payment method', 'payment_method', { type: 'select', value: 'UPI', required: true, choices: [['Cash', 'Cash'], ['UPI', 'UPI'], ['Card', 'Card'], ['EMI', 'EMI'], ['Bank transfer', 'Bank transfer'], ['Other', 'Other']] }),
+      formField('Sale date', 'sold_at', { type: 'date', value: new Date().toISOString().slice(0, 10), required: true }),
+      formField('Notes', 'notes', { type: 'textarea', full: true, placeholder: 'Exchange, warranty, or invoice notes...' }),
+    ].join('');
+  }
+  const customerList = customerChoices(state.presetCustomerId);
+  return [
+    formField('Customer', 'customer_id', { type: 'select', value: state.presetCustomerId || customerList[0]?.[0] || '', required: true, choices: customerList.map(([id, label]) => [id, label]) }),
+    formField('Activity type', 'activity_type', { type: 'select', value: 'Call', required: true, choices: [['Call', 'Phone call'], ['WhatsApp', 'WhatsApp'], ['Visit', 'Store visit'], ['Email', 'Email'], ['Note', 'Note']] }),
+    formField('Reminder date', 'due_at', { type: 'datetime-local', value: new Date(Date.now() + 86400000).toISOString().slice(0, 16), required: true }),
+    formField('Subject', 'subject', { value: '', required: true, full: true, placeholder: 'e.g. Check in after purchase' }),
+    formField('Notes', 'notes', { type: 'textarea', full: true, placeholder: 'What should you discuss?' }),
+  ].join('');
+}
 
 function closeModal() {
-  modalOverlay.classList.add('hidden');
+  const overlay = document.getElementById('modal-overlay');
+  overlay.classList.remove('open');
+  overlay.setAttribute('aria-hidden', 'true');
+  document.body.style.overflow = '';
+  state.modalType = null;
   state.editingId = null;
-  state.editingType = null;
 }
 
-function openModal(type, prefill = null) {
-  state.editingId = null;
-  state.editingType = type;
-  buildForm(type, prefill);
-  modalOverlay.classList.remove('hidden');
-}
-
-async function openEditModal(type, id) {
-  state.editingId = id;
-  state.editingType = type;
-  try {
-    const data = await apiFetch(`/api/${type}s/${id}`);
-    buildForm(type, data);
-    modalOverlay.classList.remove('hidden');
-  } catch (e) {
-    showToast('Failed to load item: ' + e.message, 'error');
-  }
-}
-
-// Form Builder
-async function buildForm(type, data = null) {
-  const title = document.getElementById('modal-title');
-  const body = document.getElementById('modal-body');
-  const isEdit = !!data && !!state.editingId;
-  title.textContent = `${isEdit ? 'Edit' : 'Add'} ${capitalize(type)}`;
-
-  // Ensure state data is up-to-date for dropdowns
-  if (state.companies.length === 0) {
-    try { state.companies = await apiFetch('/api/companies'); } catch {}
-  }
-  if (state.contacts.length === 0) {
-    try { state.contacts = await apiFetch('/api/contacts'); } catch {}
-  }
-  if (state.deals.length === 0 && type === 'interaction') {
-    try { state.deals = await apiFetch('/api/deals'); } catch {}
-  }
-
-  const companyOptions = state.companies.map(c =>
-    `<option value="${c.id}" ${data && data.company_id === c.id ? 'selected' : ''}>${escHtml(c.name)}</option>`
-  ).join('');
-  const contactOptions = state.contacts.map(c =>
-    `<option value="${c.id}" ${data && data.contact_id === c.id ? 'selected' : ''}>${escHtml(c.name)}</option>`
-  ).join('');
-  const dealOptions = state.deals.map(d =>
-    `<option value="${d.id}" ${data && data.deal_id === d.id ? 'selected' : ''}>${escHtml(d.title)}</option>`
-  ).join('');
-
-  const field = (id, label, type, value, required = false, extra = '') =>
-    `<div>
-      <label class="block text-xs font-semibold text-slate-600 mb-1.5">${label}${required ? ' <span class="text-red-400">*</span>' : ''}</label>
-      <input id="${id}" type="${type}" value="${escAttr(value || '')}" ${required ? 'required' : ''} ${extra}
-        class="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl bg-slate-50 focus:bg-white transition-colors" />
-    </div>`;
-
-  const select = (id, label, options, value = '', required = false) =>
-    `<div>
-      <label class="block text-xs font-semibold text-slate-600 mb-1.5">${label}${required ? ' <span class="text-red-400">*</span>' : ''}</label>
-      <select id="${id}" ${required ? 'required' : ''}
-        class="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl bg-slate-50 focus:bg-white transition-colors appearance-none">
-        ${options}
-      </select>
-    </div>`;
-
-  const textarea = (id, label, value = '') =>
-    `<div>
-      <label class="block text-xs font-semibold text-slate-600 mb-1.5">${label}</label>
-      <textarea id="${id}" rows="3"
-        class="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl bg-slate-50 focus:bg-white transition-colors resize-none">${escHtml(value || '')}</textarea>
-    </div>`;
-
-  const forms = {
-    company: `
-      ${field('f-name', 'Company Name', 'text', data?.name, true)}
-      ${field('f-industry', 'Industry', 'text', data?.industry)}
-      ${field('f-email', 'Email', 'email', data?.email)}
-      ${field('f-phone', 'Phone', 'text', data?.phone)}
-      ${field('f-website', 'Website', 'url', data?.website)}
-      ${textarea('f-address', 'Address', data?.address)}`,
-
-    contact: `
-      ${field('f-name', 'Full Name', 'text', data?.name, true)}
-      ${field('f-email', 'Email', 'email', data?.email)}
-      ${field('f-phone', 'Phone', 'text', data?.phone)}
-      ${field('f-position', 'Position / Title', 'text', data?.position)}
-      ${select('f-company', 'Company', `<option value="">— Select Company —</option>${companyOptions}`, data?.company_id)}`,
-
-    deal: `
-      ${field('f-title', 'Deal Title', 'text', data?.title, true)}
-      ${field('f-value', 'Value ($)', 'number', data?.value, false, 'min="0" step="0.01"')}
-      ${select('f-stage', 'Stage', STAGES.map(s => `<option value="${s}" ${data?.stage === s ? 'selected' : ''}>${s}</option>`).join(''), data?.stage, true)}
-      ${field('f-close-date', 'Expected Close Date', 'date', data?.close_date)}
-      ${select('f-company', 'Company', `<option value="">— Select Company —</option>${companyOptions}`, data?.company_id)}
-      ${select('f-contact', 'Contact', `<option value="">— Select Contact —</option>${contactOptions}`, data?.contact_id)}`,
-
-    interaction: `
-      ${select('f-type', 'Type', ['call','email','meeting','note'].map(t => `<option value="${t}" ${data?.type === t ? 'selected' : ''}>${capitalize(t)}</option>`).join(''), data?.type || 'note', true)}
-      ${textarea('f-notes', 'Notes / Details', data?.notes)}
-      ${field('f-date', 'Date & Time', 'datetime-local', data?.interaction_date ? data.interaction_date.substring(0,16) : '')}
-      ${select('f-contact', 'Contact', `<option value="">— Select Contact —</option>${contactOptions}`, data?.contact_id)}
-      ${select('f-company', 'Company', `<option value="">— Select Company —</option>${companyOptions}`, data?.company_id)}
-      ${select('f-deal', 'Related Deal', `<option value="">— Select Deal —</option>${dealOptions}`, data?.deal_id)}`,
-  };
-
-  body.innerHTML = forms[type] || '<p class="text-slate-500">Unknown type</p>';
-}
-
-// Submit modal
-document.getElementById('modal-submit').addEventListener('click', async () => {
-  const type = state.editingType;
-  const isEdit = !!state.editingId;
-  const g = id => document.getElementById(id);
-  const val = id => g(id)?.value || null;
-
-  let payload = {};
-  if (type === 'company') {
-    if (!val('f-name')) { showToast('Company name is required', 'error'); return; }
-    payload = {
-      name: val('f-name'), industry: val('f-industry') || null,
-      email: val('f-email') || null, phone: val('f-phone') || null,
-      website: val('f-website') || null, address: val('f-address') || null,
-    };
-    const fn = () => g('f-address')?.value || null;
-    payload.address = g('f-address')?.value || null;
-  } else if (type === 'contact') {
-    if (!val('f-name')) { showToast('Contact name is required', 'error'); return; }
-    payload = {
-      name: val('f-name'), email: val('f-email') || null,
-      phone: val('f-phone') || null, position: val('f-position') || null,
-      company_id: val('f-company') ? parseInt(val('f-company')) : null,
-    };
-  } else if (type === 'deal') {
-    if (!val('f-title')) { showToast('Deal title is required', 'error'); return; }
-    payload = {
-      title: val('f-title'),
-      value: val('f-value') ? parseFloat(val('f-value')) : null,
-      stage: val('f-stage') || 'Lead',
-      close_date: val('f-close-date') || null,
-      company_id: val('f-company') ? parseInt(val('f-company')) : null,
-      contact_id: val('f-contact') ? parseInt(val('f-contact')) : null,
-    };
-  } else if (type === 'interaction') {
-    payload = {
-      type: val('f-type') || 'note',
-      notes: g('f-notes')?.value || null,
-      interaction_date: val('f-date') ? new Date(val('f-date')).toISOString() : null,
-      contact_id: val('f-contact') ? parseInt(val('f-contact')) : null,
-      company_id: val('f-company') ? parseInt(val('f-company')) : null,
-      deal_id: val('f-deal') ? parseInt(val('f-deal')) : null,
-    };
-  }
-
-  const submitBtn = document.getElementById('modal-submit');
-  submitBtn.disabled = true;
-  submitBtn.textContent = 'Saving...';
-
-  try {
-    const url = isEdit ? `/api/${type}s/${state.editingId}` : `/api/${type}s`;
-    const method = isEdit ? 'PUT' : 'POST';
-    await apiFetch(url, method, payload);
-    showToast(`${capitalize(type)} ${isEdit ? 'updated' : 'created'} successfully!`, 'success');
-    closeModal();
-    await loadSection(state.currentSection);
-    if (state.currentSection !== 'dashboard') {
-      state.companies = [];
-      state.contacts = [];
+function formPayload(form, type) {
+  const data = Object.fromEntries(new FormData(form).entries());
+  if (type === 'customer') {
+    data.phone = data.phone.trim();
+    for (const field of ['email', 'address', 'city', 'state', 'pincode', 'preferred_brand', 'notes']) {
+      if (!data[field]) data[field] = null;
     }
-  } catch (err) {
-    showToast(`Error: ${err.message}`, 'error');
+  } else if (type === 'product') {
+    data.price = Number(data.price);
+    data.stock = Number(data.stock);
+    data.original_price = null;
+    data.description = '';
+    data.colour_hex = '#454545';
+    data.rating = 4.5;
+    data.review_count = 0;
+    data.badge = null;
+    data.featured = false;
+  } else if (type === 'sale') {
+    data.customer_id = Number(data.customer_id);
+    data.product_id = Number(data.product_id);
+    data.quantity = Number(data.quantity);
+    if (data.unit_price) data.unit_price = Number(data.unit_price);
+    else delete data.unit_price;
+    data.sold_at = new Date(`${data.sold_at}T12:00:00`).toISOString();
+    if (!data.notes) data.notes = null;
+  } else {
+    data.customer_id = Number(data.customer_id);
+    data.due_at = new Date(data.due_at).toISOString();
+    if (!data.notes) data.notes = null;
+  }
+  return data;
+}
+
+async function submitModal(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  if (!form.reportValidity()) return;
+  const submitButton = document.getElementById('modal-submit');
+  submitButton.disabled = true;
+  try {
+    const type = state.modalType;
+    const id = state.editingId;
+    const endpoint = {
+      customer: id ? `/api/customers/${id}` : '/api/customers',
+      product: id ? `/api/products/${id}` : '/api/products',
+      sale: '/api/sales',
+      followup: '/api/follow-ups',
+    }[type];
+    await apiFetch(endpoint, {
+      method: id ? 'PUT' : 'POST',
+      body: JSON.stringify(formPayload(form, type)),
+    });
+    closeModal();
+    await loadData();
+    const successMessage = {
+      customer: id ? 'Customer details updated.' : 'Customer added to your book.',
+      product: id ? 'Phone inventory updated.' : 'Phone added to inventory.',
+      sale: 'Sale recorded and stock updated.',
+      followup: 'Customer follow-up scheduled.',
+    };
+    showToast(successMessage[type]);
+  } catch (error) {
+    showToast(error.message, 'error');
   } finally {
-    submitBtn.disabled = false;
-    submitBtn.textContent = 'Save';
+    submitButton.disabled = false;
+  }
+}
+
+function customerById(id) {
+  return state.customers.find((customer) => customer.id === Number(id));
+}
+
+function productById(id) {
+  return state.products.find((product) => product.id === Number(id));
+}
+
+document.querySelectorAll('.nav [data-section]').forEach((button) => {
+  button.addEventListener('click', () => navigateTo(button.dataset.section));
+});
+
+document.getElementById('add-button').addEventListener('click', () => {
+  const modalType = state.section === 'inventory' ? 'product'
+    : state.section === 'sales' ? 'sale'
+      : state.section === 'followups' ? 'followup' : 'customer';
+  openModal(modalType);
+});
+
+document.getElementById('logout-button').addEventListener('click', async () => {
+  try {
+    await apiFetch('/api/auth/logout', { method: 'POST' });
+    window.location.assign('/login');
+  } catch (error) {
+    showToast(`Could not sign out: ${error.message}`, 'error');
   }
 });
 
-// ─── DELETE ───────────────────────────────────────────────────────────────────
+document.querySelectorAll('[data-action]').forEach((button) => {
+  button.addEventListener('click', () => openModal(button.dataset.action));
+});
 
-function deleteItem(type, id, name) {
-  showConfirm(`Delete "${name}"? This action cannot be undone.`, async () => {
+document.querySelectorAll('[data-go]').forEach((button) => {
+  button.addEventListener('click', () => navigateTo(button.dataset.go));
+});
+
+document.getElementById('modal-form').addEventListener('submit', submitModal);
+document.getElementById('modal-close').addEventListener('click', closeModal);
+document.getElementById('modal-cancel').addEventListener('click', closeModal);
+document.getElementById('modal-overlay').addEventListener('click', (event) => {
+  if (event.target.id === 'modal-overlay') closeModal();
+});
+
+document.getElementById('customers-table').addEventListener('click', (event) => {
+  const edit = event.target.closest('[data-edit-customer]');
+  if (edit) return openModal('customer', customerById(edit.dataset.editCustomer));
+  const sale = event.target.closest('[data-add-sale-customer]');
+  if (sale) return openModal('sale', null, Number(sale.dataset.addSaleCustomer));
+  const followup = event.target.closest('[data-add-followup-customer]');
+  if (followup) return openModal('followup', null, Number(followup.dataset.addFollowupCustomer));
+});
+
+document.getElementById('inventory-table').addEventListener('click', (event) => {
+  const button = event.target.closest('[data-edit-product]');
+  if (button) openModal('product', productById(button.dataset.editProduct));
+});
+
+document.getElementById('followups-table').addEventListener('click', async (event) => {
+  const complete = event.target.closest('[data-complete-followup]');
+  if (complete) {
+    complete.disabled = true;
     try {
-      await apiFetch(`/api/${type}s/${id}`, 'DELETE');
-      showToast(`${capitalize(type)} deleted`, 'success');
-      // Refresh state
-      if (type === 'company') {
-        state.companies = state.companies.filter(c => c.id !== id);
-        renderCompanies(state.companies);
-      } else if (type === 'contact') {
-        state.contacts = state.contacts.filter(c => c.id !== id);
-        renderContacts(state.contacts);
-      } else if (type === 'deal') {
-        state.deals = state.deals.filter(d => d.id !== id);
-        renderDeals();
-      } else if (type === 'interaction') {
-        state.interactions = state.interactions.filter(i => i.id !== id);
-        renderInteractions();
-      }
-      // Refresh dashboard if visible
-      if (state.currentSection === 'dashboard') loadDashboard();
-    } catch (err) {
-      showToast(`Failed to delete: ${err.message}`, 'error');
+      await apiFetch(`/api/follow-ups/${complete.dataset.completeFollowup}`, {
+        method: 'PUT',
+        body: JSON.stringify({ status: 'Completed' }),
+      });
+      await loadData();
+      showToast('Follow-up marked complete.');
+    } catch (error) {
+      showToast(error.message, 'error');
+      complete.disabled = false;
     }
-  });
-}
+    return;
+  }
+  const edit = event.target.closest('[data-edit-followup]');
+  if (edit) {
+    const item = state.followups.find((followup) => followup.id === Number(edit.dataset.editFollowup));
+    if (!item) return;
+    openModal('followup', {
+      ...item,
+      due_at: new Date(item.due_at).toISOString().slice(0, 16),
+    });
+    document.getElementById('modal-title').textContent = 'Update follow-up';
+    const statusChoices = [['Pending', 'Pending'], ['Completed', 'Completed'], ['Cancelled', 'Cancelled']];
+    document.getElementById('modal-fields').insertAdjacentHTML(
+      'beforeend',
+      formField('Status', 'status', { type: 'select', value: item.status, choices: statusChoices }),
+    );
+    state.modalType = 'followup-edit';
+    state.modalType = 'followup';
+  }
+});
 
-// ─── HELPERS ──────────────────────────────────────────────────────────────────
+document.getElementById('followup-filter').addEventListener('change', (event) => {
+  state.followupStatus = event.target.value;
+  loadData();
+});
 
-function capitalize(s) { return s ? s.charAt(0).toUpperCase() + s.slice(1) : ''; }
+let searchTimer;
+document.getElementById('global-search').addEventListener('input', (event) => {
+  state.search = event.target.value;
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(loadData, 220);
+});
 
-function escHtml(str) {
-  if (!str) return '';
-  return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
-}
+document.getElementById('search-wrap').addEventListener('click', () => {
+  document.getElementById('search-wrap').classList.add('open');
+});
 
-function escAttr(str) {
-  if (!str) return '';
-  return String(str).replace(/"/g,'&quot;').replace(/'/g,'&#39;');
-}
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape') closeModal();
+});
 
-// ─── INIT ─────────────────────────────────────────────────────────────────────
-
-navigateTo('dashboard');
+renderDashboard();
+loadData();
